@@ -1,0 +1,18 @@
+
+
+```{r, dpi=300, fig.width={{ fig.width }}, fig.height={{ fig.height }}}
+if (length(non.ids) > 0) {
+  emms.gg <- emms2[which(emms2${{ iv }} == "{{ value }}"),]
+  if (nrow(emms.gg) > 0)
+    ggline(emms.gg, x = "time", y = "emmean", color = "{{ color }}", ylab = "{{ dv }}") +
+    geom_errorbar(aes(ymin = conf.low, ymax = conf.high),
+                  width = 0.2, color = "{{ color }}") +
+    stat_pvalue_manual(
+      add_xy_position(pwc[which(pwc${{ iv }} == "{{ value }}"),],
+                      x = "time", fun = "mean_se"),
+      hide.ns = T, color = "{{ color }}", tip.length = F) +
+    labs(title = "{{ iv }}: {{ value }}") +
+    theme(legend.text = element_blank())
+}
+```
+

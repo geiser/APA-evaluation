@@ -1,0 +1,234 @@
+
+
+#{{ title }} 
+
+## Data Preparation
+
+```{r}
+data <- edat[,c("aluno_id","{{ iv }}","ciclo","{{ dv }}")]
+data <- data[data$ciclo %in% c("{{ paste0(ciclos.full, collapse = '","') }}"),]
+data$ciclo <- factor(data$ciclo, c("{{ paste0(ciclos.full, collapse = '","') }}"))
+data <- unique(data)
+
+wdat <- spread(data, ciclo, {{ dv }})
+wdat <- wdat[complete.cases(wdat),]
+colnames(wdat) <- c("id","{{ iv }}","{{ paste0(ciclos.short, collapse = '","') }}")
+
+ldat <- gather(wdat, key = time, value = {{ dv }}, {{ paste0(ciclos.short, collapse = ',') }}) %>%
+  convert_as_factor(id, time)
+ldat <- remove_group_data(ldat, "{{ dv }}", c("time", "{{ iv }}"), n.limit = 30)
+ldat${{ iv }} <- factor(ldat${{ iv }}, sort(unique(ldat${{ iv }})))
+```
+
+### Check assumptions: Identifying Outliers
+
+```{r}
+outliers <- identify_outliers(group_by(ldat, time, {{ iv }}), {{ dv }})
+(outliers <- outliers[outliers$is.extreme == T,])
+```
+
+```{r, echo=F, purl=F}
+kable(outliers, digits = 3)
+```
+
+### Check assumptions: Normality Test
+
+```{r}
+(normality.df <- normality.test.per.groups(ldat, "{{ dv }}", c("time", "{{ iv }}")))
+```
+
+```{r, echo=F, purl=F}
+kable(normality.df, digits = 3)
+```
+
+```{r}
+(non.ids <- unique(do.call(
+  c, lapply(which(normality.df$normality == 'NO'), FUN = function(i) {
+  idx = which(ldat$time == normality.df$time[i] &
+                ldat${{ iv }} == normality.df${{ iv }}[i])
+  getNonNormal(ldat$"{{ dv }}"[idx], ldat$id[idx])
+}))))
+```
+
+```{r}
+if (length(non.ids) > 0)
+  ldat2 <- ldat[!ldat$id %in% non.ids,]
+```
+
+### Summary Statistics
+
+```{r}
+(sdat <- ldat %>% group_by(time, {{ iv }}) %>%
+   get_summary_stats({{ dv }}, type = "mean_sd"))
+```
+
+```{r, echo=F, purl=F}
+kable(sdat, digits = 3)
+```
+
+
+```{r}
+if (length(non.ids) > 0)
+  (sdat <- ldat2 %>% group_by(time, {{ iv }}) %>%
+      get_summary_stats({{ dv }}, type = "mean_sd"))
+```
+
+
+```{r, echo=F, purl=F}
+kable(sdat, digits = 3)
+```
+
+## ANOVA Computation
+
+```{r}
+(res.aov <- anova_test(ldat, dv = {{ dv }}, wid = id, between = {{ iv }}, within = time))
+```
+
+```{r, echo=F, purl=F}
+kable(res.aov$ANOVA, digits = 3)
+```
+
+```{r, echo=F, purl=F}
+kable(res.aov$`Mauchly's Test for Sphericity`, digits = 3)
+```
+
+```{r, echo=F, purl=F}
+kable(res.aov$`Sphericity Corrections`, digits = 3)
+```
+
+## ANOVA Computation after removing non.normal data
+
+
+```{r}
+if (length(non.ids) > 0)
+  (res.aov2 <- anova_test(ldat2, dv = {{ dv }}, wid = id, between = {{ iv }} , within = time))
+```
+
+```{r, echo=F, purl=F}
+if (length(non.ids) > 0)
+  kable(res.aov2$ANOVA, digits = 3)
+```
+
+```{r, echo=F, purl=F}
+if (length(non.ids) > 0)
+  kable(res.aov2$`Mauchly's Test for Sphericity`, digits = 3)
+```
+
+```{r, echo=F, purl=F}
+if (length(non.ids) > 0)
+  kable(res.aov2$`Sphericity Corrections`, digits = 3)
+```
+
+
+## PairWise Computation
+
+```{r}
+(pwc <- ldat %>% group_by(time) %>%
+   emmeans_test({{ dv }} ~ {{ iv }}, detailed = T, p.adjust.method = "bonferroni"))
+```
+
+```{r, echo=F, purl=F}
+kable(pwc, digits = 3)
+```
+
+```{r}
+(emms <- get_emmeans(pwc))
+```
+
+```{r, echo=F, purl=F}
+kable(emms, digits = 3)
+```
+
+```{r, dpi=300, fig.width={{ fig.width }}, fig.height={{ fig.height }}}
+pwc <- add_xy_position(pwc, x = "time", fun = "mean_se", dodge = 0.25)
+pd <- position_dodge(width = 0.25)
+ggline(emms, x = "time", y = "emmean", color = "{{ iv }}",
+       palette = c({{ paste0('"', paste0(pcolors, collapse = '","') ,'"') }}),
+       position = pd, ylab = "{{ dv }}") +
+  geom_errorbar(aes(ymin = conf.low, ymax = conf.high, color = {{ iv }}),
+                position = pd, width = 0.2) +
+  stat_pvalue_manual(pwc, hide.ns = T, tip.length = F, linetype = 1)
+```
+
+
+```{r}
+(pwc <- ldat %>% group_by({{ iv }}) %>%
+    emmeans_test({{ dv }} ~ time, detailed = T, p.adjust.method = "bonferroni"))
+```
+
+```{r, echo=F, purl=F}
+kable(pwc, digits = 3)
+```
+
+```{r}
+(emms <- get_emmeans(pwc))
+```
+
+```{r, echo=F, purl=F}
+kable(emms, digits = 3)
+```
+
+{{ pwc.plots }}
+
+
+## PairWise Computation after removing non.normal data
+
+
+```{r}
+if (length(non.ids) > 0)
+  (pwc2 <- ldat2 %>% group_by(time) %>%
+     emmeans_test({{ dv }} ~ {{ iv }}, detailed = T, p.adjust.method = "bonferroni"))
+```
+
+```{r, echo=F, purl=F}
+if (length(non.ids) > 0)
+  kable(pwc2, digits = 3)
+```
+
+```{r}
+if (length(non.ids) > 0)
+  (emms2 <- get_emmeans(pwc2))
+```
+
+```{r, echo=F, purl=F}
+if (length(non.ids) > 0)
+  kable(emms2, digits = 3)
+```
+
+```{r, dpi=300, fig.width={{ fig.width }}, fig.height={{ fig.height }}}
+if (length(non.ids) > 0) {
+  pwc2 <- add_xy_position(pwc2, x = "time", fun = "mean_se", dodge = 0.25)
+  pd2 <- position_dodge(width = 0.25)
+  
+  ggline(emms2, x = "time", y = "emmean", color = "{{ iv }}",
+         palette = c({{ paste0('"', paste0(pcolors, collapse = '","') ,'"') }}),
+         position = pd, ylab = "{{ dv }}") +
+    geom_errorbar(aes(ymin = conf.low, ymax = conf.high, color = {{ iv }}),
+                position = pd, width = 0.2) +
+    stat_pvalue_manual(pwc2, hide.ns = T, tip.length = F, linetype = 1)
+}
+```
+
+
+```{r}
+if (length(non.ids) > 0)
+  (pwc2 <- ldat2 %>% group_by({{ iv }}) %>%
+     emmeans_test({{ dv }} ~ time, detailed = T, p.adjust.method = "bonferroni"))
+```
+
+```{r, echo=F, purl=F}
+if (length(non.ids) > 0)
+  kable(pwc2, digits = 3)
+```
+
+```{r}
+if (length(non.ids) > 0)
+  (emms2 <- get_emmeans(pwc2))
+```
+
+```{r, echo=F, purl=F}
+if (length(non.ids) > 0)
+  kable(emms2, digits = 3)
+```
+
+{{ pwc.plots2 }}

@@ -1,0 +1,133 @@
+---
+title: "ANOVA test for {{ dv }}"
+author: Geiser C. Challco <geiser@alumni.usp.br>
+comment: ANOVA test to determine whether there were significant differences.
+         
+         Author - Geiser C. Challco <geiser@alumni.usp.br>
+         
+         Shiny-Statistic is distributed in the hope that it will be useful,
+         but WITHOUT ANY WARRANTY; without even the implied warranty of
+         MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+         GNU General Public License for more details.
+         
+         You should have received a copy of the GNU General Public License.
+         This file is  generate using Shiny-Statistic app (https://github.com/geiser/rshinystatistics)
+         If not, see <https://www.gnu.org/licenses/>.
+output:
+  github_document:
+    toc: true
+  word_document:
+    toc: true
+  html_document:
+    toc: true
+fontsize: 10pt
+---
+
+
+```{r setup, include=FALSE}
+# Install and Load Packages
+
+if (!'remotes' %in% rownames(installed.packages())) install.packages('remotes')
+if (!"rshinystatistics" %in% rownames(installed.packages())) {
+  remotes::install_github("geiser/rshinystatistics")
+} else if (packageVersion("rshinystatistics") < "0.0.0.9900") {
+  remotes::install_github("geiser/rshinystatistics")
+}
+
+wants <- c('ggplot2','ggpubr','rshinystatistics','rstatix','utils','randomcoloR')
+has <- wants %in% rownames(installed.packages())
+if (any(!has)) install.packages(wants[!has])
+
+library(shiny)
+library(esquisse)
+library(scales)
+library(knitr)
+library(rmarkdown)
+
+library(utils)
+library(ggpubr)
+library(ggplot2)
+library(randomcoloR)
+
+library(rshinystatistics)
+library(rstatix)
+
+library(readxl)
+```
+
+```{r}
+dat <- read_excel("{{ file.path }}", sheet = "{{ sheet }}")
+
+escolas <- read_excel("{{ file.path }}", sheet = "escolas")
+edat <- merge(dat, escolas, by = "cod_escola", all.x = T)
+```
+
+
+# ANOVA: {{ dv }} ~ time
+
+## Data Preparation
+
+```{r}
+data <- edat[,c("aluno_id","ciclo","{{ dv }}")]
+data <- data[data$ciclo %in% c("{{ paste0(ciclos.full, collapse = '","') }}"),]
+data$ciclo <- factor(data$ciclo, c("{{ paste0(ciclos.full, collapse = '","') }}"))
+data <- unique(data)
+
+wdat <- spread(data, ciclo, {{ dv }})
+wdat <- wdat[complete.cases(wdat),]
+colnames(wdat) <- c("id","{{ paste0(ciclos.short, collapse = '","') }}")
+
+ldat <- gather(wdat, key = time, value = {{ dv }}, {{ paste0(ciclos.short, collapse = ',') }}) %>%
+  convert_as_factor(id, time)
+ldat <- rshinystatistics::remove_group_data(ldat, "{{ dv }}", "time", n.limit = 30)
+```
+
+## Summary Statistics
+
+```{r}
+(sdat <- ldat %>% group_by(time) %>%
+   get_summary_stats({{ dv }}, type = "mean_sd"))
+```
+
+```{r, echo=F, purl=F}
+kable(sdat, digits = 3)
+```
+
+## ANOVA Computation
+
+
+```{r}
+(res.aov <- anova_test(ldat, dv = {{ dv }}, wid = id, within = time))
+```
+
+```{r, echo=F, purl=F}
+kable(res.aov$ANOVA, digits = 3)
+```
+
+```{r, echo=F, purl=F}
+kable(res.aov$`Mauchly's Test for Sphericity`, digits = 3)
+```
+
+```{r, echo=F, purl=F}
+kable(res.aov$`Sphericity Corrections`, digits = 3)
+```
+
+## PairWise Computation
+
+```{r}
+(pwc <- ldat %>% emmeans_test({{ dv }} ~ time, detailed = T, p.adjust.method = "bonferroni"))
+```
+
+```{r, echo=F, purl=F}
+kable(pwc, digits = 3)
+```
+
+```{r, dpi=300, fig.width={{ fig.width }}, fig.height={{ fig.height }}}
+pwc <- add_xy_position(pwc, x = "time", fun = "mean_se")
+ggline(get_emmeans(pwc), x = "time", y = "emmean", ylab = "{{ dv }}") +
+  geom_errorbar(aes(ymin = conf.low, ymax = conf.high), width = 0.2) +
+  stat_pvalue_manual(pwc, hide.ns = T, tip.length = F)
+```
+
+{{ one.factor }}
+
