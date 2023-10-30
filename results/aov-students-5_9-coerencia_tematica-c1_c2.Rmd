@@ -1,0 +1,825 @@
+---
+title: "ANOVA test for coerencia_tematica"
+author: Geiser C. Challco <geiser@alumni.usp.br>
+comment: ANOVA test to determine whether there were significant differences.
+         
+         Author - Geiser C. Challco <geiser@alumni.usp.br>
+         
+         Shiny-Statistic is distributed in the hope that it will be useful,
+         but WITHOUT ANY WARRANTY; without even the implied warranty of
+         MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+         GNU General Public License for more details.
+         
+         You should have received a copy of the GNU General Public License.
+         This file is  generate using Shiny-Statistic app (https://github.com/geiser/rshinystatistics)
+         If not, see <https://www.gnu.org/licenses/>.
+output:
+  github_document:
+    toc: true
+  word_document:
+    toc: true
+  html_document:
+    toc: true
+fontsize: 10pt
+---
+
+
+```{r setup, include=FALSE}
+# Install and Load Packages
+
+if (!'remotes' %in% rownames(installed.packages())) install.packages('remotes')
+if (!"rshinystatistics" %in% rownames(installed.packages())) {
+  remotes::install_github("geiser/rshinystatistics")
+} else if (packageVersion("rshinystatistics") < "0.0.0.9900") {
+  remotes::install_github("geiser/rshinystatistics")
+}
+
+wants <- c('ggplot2','ggpubr','rshinystatistics','rstatix','utils','randomcoloR')
+has <- wants %in% rownames(installed.packages())
+if (any(!has)) install.packages(wants[!has])
+
+library(shiny)
+library(esquisse)
+library(scales)
+library(knitr)
+library(rmarkdown)
+
+library(utils)
+library(ggpubr)
+library(ggplot2)
+library(randomcoloR)
+
+library(rshinystatistics)
+library(rstatix)
+
+library(readxl)
+```
+
+```{r}
+dat <- read_excel("../data/data.xlsx", sheet = "alunos_ef59")
+
+escolas <- read_excel("../data/data.xlsx", sheet = "escolas")
+edat <- merge(dat, escolas, by = "cod_escola", all.x = T)
+```
+
+
+# ANOVA: coerencia_tematica ~ time
+
+## Data Preparation
+
+```{r}
+data <- edat[,c("aluno_id","ciclo","coerencia_tematica")]
+data <- data[data$ciclo %in% c("Primeiro Ciclo","Segundo Ciclo"),]
+data$ciclo <- factor(data$ciclo, c("Primeiro Ciclo","Segundo Ciclo"))
+data <- unique(data)
+
+wdat <- spread(data, ciclo, coerencia_tematica)
+wdat <- wdat[complete.cases(wdat),]
+colnames(wdat) <- c("id","c1","c2")
+
+ldat <- gather(wdat, key = time, value = coerencia_tematica, c1,c2) %>%
+  convert_as_factor(id, time)
+ldat <- rshinystatistics::remove_group_data(ldat, "coerencia_tematica", "time", n.limit = 30)
+```
+
+## Summary Statistics
+
+```{r}
+(sdat <- ldat %>% group_by(time) %>%
+   get_summary_stats(coerencia_tematica, type = "mean_sd"))
+```
+
+```{r, echo=F, purl=F}
+kable(sdat, digits = 3)
+```
+
+## ANOVA Computation
+
+
+```{r}
+(res.aov <- anova_test(ldat, dv = coerencia_tematica, wid = id, within = time))
+```
+
+```{r, echo=F, purl=F}
+kable(res.aov$ANOVA, digits = 3)
+```
+
+```{r, echo=F, purl=F}
+kable(res.aov$`Mauchly's Test for Sphericity`, digits = 3)
+```
+
+```{r, echo=F, purl=F}
+kable(res.aov$`Sphericity Corrections`, digits = 3)
+```
+
+## PairWise Computation
+
+```{r}
+(pwc <- ldat %>% emmeans_test(coerencia_tematica ~ time, detailed = T, p.adjust.method = "bonferroni"))
+```
+
+```{r, echo=F, purl=F}
+kable(pwc, digits = 3)
+```
+
+```{r, dpi=300, fig.width=10, fig.height=6}
+pwc <- add_xy_position(pwc, x = "time", fun = "mean_se")
+ggline(get_emmeans(pwc), x = "time", y = "emmean", ylab = "coerencia_tematica") +
+  geom_errorbar(aes(ymin = conf.low, ymax = conf.high), width = 0.2) +
+  stat_pvalue_manual(pwc, hide.ns = T, tip.length = F)
+```
+
+
+
+# ANOVA: coerencia_tematica ~ time*gender + Error(id/time) 
+
+## Data Preparation
+
+```{r}
+data <- edat[,c("aluno_id","gender","ciclo","coerencia_tematica")]
+data <- data[data$ciclo %in% c("Primeiro Ciclo","Segundo Ciclo"),]
+data$ciclo <- factor(data$ciclo, c("Primeiro Ciclo","Segundo Ciclo"))
+data <- unique(data)
+
+wdat <- spread(data, ciclo, coerencia_tematica)
+wdat <- wdat[complete.cases(wdat),]
+colnames(wdat) <- c("id","gender","c1","c2")
+
+ldat <- gather(wdat, key = time, value = coerencia_tematica, c1,c2) %>%
+  convert_as_factor(id, time)
+ldat <- remove_group_data(ldat, "coerencia_tematica", c("time", "gender"), n.limit = 30)
+ldat$gender <- factor(ldat$gender, sort(unique(ldat$gender)))
+```
+
+### Check assumptions: Identifying Outliers
+
+```{r}
+outliers <- identify_outliers(group_by(ldat, time, gender), coerencia_tematica)
+(outliers <- outliers[outliers$is.extreme == T,])
+```
+
+```{r, echo=F, purl=F}
+kable(outliers, digits = 3)
+```
+
+### Check assumptions: Normality Test
+
+```{r}
+(normality.df <- normality.test.per.groups(ldat, "coerencia_tematica", c("time", "gender")))
+```
+
+```{r, echo=F, purl=F}
+kable(normality.df, digits = 3)
+```
+
+```{r}
+(non.ids <- unique(do.call(
+  c, lapply(which(normality.df$normality == 'NO'), FUN = function(i) {
+  idx = which(ldat$time == normality.df$time[i] &
+                ldat$gender == normality.df$gender[i])
+  getNonNormal(ldat$"coerencia_tematica"[idx], ldat$id[idx])
+}))))
+```
+
+```{r}
+if (length(non.ids) > 0)
+  ldat2 <- ldat[!ldat$id %in% non.ids,]
+```
+
+### Summary Statistics
+
+```{r}
+(sdat <- ldat %>% group_by(time, gender) %>%
+   get_summary_stats(coerencia_tematica, type = "mean_sd"))
+```
+
+```{r, echo=F, purl=F}
+kable(sdat, digits = 3)
+```
+
+
+```{r}
+if (length(non.ids) > 0)
+  (sdat <- ldat2 %>% group_by(time, gender) %>%
+      get_summary_stats(coerencia_tematica, type = "mean_sd"))
+```
+
+
+```{r, echo=F, purl=F}
+kable(sdat, digits = 3)
+```
+
+## ANOVA Computation
+
+```{r}
+(res.aov <- anova_test(ldat, dv = coerencia_tematica, wid = id, between = gender, within = time))
+```
+
+```{r, echo=F, purl=F}
+kable(res.aov$ANOVA, digits = 3)
+```
+
+```{r, echo=F, purl=F}
+kable(res.aov$`Mauchly's Test for Sphericity`, digits = 3)
+```
+
+```{r, echo=F, purl=F}
+kable(res.aov$`Sphericity Corrections`, digits = 3)
+```
+
+## ANOVA Computation after removing non.normal data
+
+
+```{r}
+if (length(non.ids) > 0)
+  (res.aov2 <- anova_test(ldat2, dv = coerencia_tematica, wid = id, between = gender , within = time))
+```
+
+```{r, echo=F, purl=F}
+if (length(non.ids) > 0)
+  kable(res.aov2$ANOVA, digits = 3)
+```
+
+```{r, echo=F, purl=F}
+if (length(non.ids) > 0)
+  kable(res.aov2$`Mauchly's Test for Sphericity`, digits = 3)
+```
+
+```{r, echo=F, purl=F}
+if (length(non.ids) > 0)
+  kable(res.aov2$`Sphericity Corrections`, digits = 3)
+```
+
+
+## PairWise Computation
+
+```{r}
+(pwc <- ldat %>% group_by(time) %>%
+   emmeans_test(coerencia_tematica ~ gender, detailed = T, p.adjust.method = "bonferroni"))
+```
+
+```{r, echo=F, purl=F}
+kable(pwc, digits = 3)
+```
+
+```{r}
+(emms <- get_emmeans(pwc))
+```
+
+```{r, echo=F, purl=F}
+kable(emms, digits = 3)
+```
+
+```{r, dpi=300, fig.width=10, fig.height=6}
+pwc <- add_xy_position(pwc, x = "time", fun = "mean_se", dodge = 0.25)
+pd <- position_dodge(width = 0.25)
+ggline(emms, x = "time", y = "emmean", color = "gender",
+       palette = c("#FF007F","#4D4DFF"),
+       position = pd, ylab = "coerencia_tematica") +
+  geom_errorbar(aes(ymin = conf.low, ymax = conf.high, color = gender),
+                position = pd, width = 0.2) +
+  stat_pvalue_manual(pwc, hide.ns = T, tip.length = F, linetype = 1)
+```
+
+
+```{r}
+(pwc <- ldat %>% group_by(gender) %>%
+    emmeans_test(coerencia_tematica ~ time, detailed = T, p.adjust.method = "bonferroni"))
+```
+
+```{r, echo=F, purl=F}
+kable(pwc, digits = 3)
+```
+
+```{r}
+(emms <- get_emmeans(pwc))
+```
+
+```{r, echo=F, purl=F}
+kable(emms, digits = 3)
+```
+
+
+
+```{r, dpi=300, fig.width=10, fig.height=6}
+emms.gg <- emms[which(emms$gender == "Female"),]
+if (nrow(emms.gg) > 0)
+  ggline(emms.gg, x = "time", y = "emmean", color = "#FF007F", ylab = "coerencia_tematica") +
+    geom_errorbar(aes(ymin = conf.low, ymax = conf.high),
+                  width = 0.2, color = "#FF007F") +
+    stat_pvalue_manual(
+      add_xy_position(pwc[which(pwc$gender == "Female"),],
+                      x = "time", fun = "mean_se"),
+      hide.ns = T, color = "#FF007F", tip.length = F) +
+    labs(title = "gender: Female")+
+    theme(legend.text = element_blank())
+```
+
+
+```{r, dpi=300, fig.width=10, fig.height=6}
+emms.gg <- emms[which(emms$gender == "Male"),]
+if (nrow(emms.gg) > 0)
+  ggline(emms.gg, x = "time", y = "emmean", color = "#4D4DFF", ylab = "coerencia_tematica") +
+    geom_errorbar(aes(ymin = conf.low, ymax = conf.high),
+                  width = 0.2, color = "#4D4DFF") +
+    stat_pvalue_manual(
+      add_xy_position(pwc[which(pwc$gender == "Male"),],
+                      x = "time", fun = "mean_se"),
+      hide.ns = T, color = "#4D4DFF", tip.length = F) +
+    labs(title = "gender: Male")+
+    theme(legend.text = element_blank())
+```
+
+
+
+## PairWise Computation after removing non.normal data
+
+
+```{r}
+if (length(non.ids) > 0)
+  (pwc2 <- ldat2 %>% group_by(time) %>%
+     emmeans_test(coerencia_tematica ~ gender, detailed = T, p.adjust.method = "bonferroni"))
+```
+
+```{r, echo=F, purl=F}
+if (length(non.ids) > 0)
+  kable(pwc2, digits = 3)
+```
+
+```{r}
+if (length(non.ids) > 0)
+  (emms2 <- get_emmeans(pwc2))
+```
+
+```{r, echo=F, purl=F}
+if (length(non.ids) > 0)
+  kable(emms2, digits = 3)
+```
+
+```{r, dpi=300, fig.width=10, fig.height=6}
+if (length(non.ids) > 0) {
+  pwc2 <- add_xy_position(pwc2, x = "time", fun = "mean_se", dodge = 0.25)
+  pd2 <- position_dodge(width = 0.25)
+  
+  ggline(emms2, x = "time", y = "emmean", color = "gender",
+         palette = c("#FF007F","#4D4DFF"),
+         position = pd, ylab = "coerencia_tematica") +
+    geom_errorbar(aes(ymin = conf.low, ymax = conf.high, color = gender),
+                position = pd, width = 0.2) +
+    stat_pvalue_manual(pwc2, hide.ns = T, tip.length = F, linetype = 1)
+}
+```
+
+
+```{r}
+if (length(non.ids) > 0)
+  (pwc2 <- ldat2 %>% group_by(gender) %>%
+     emmeans_test(coerencia_tematica ~ time, detailed = T, p.adjust.method = "bonferroni"))
+```
+
+```{r, echo=F, purl=F}
+if (length(non.ids) > 0)
+  kable(pwc2, digits = 3)
+```
+
+```{r}
+if (length(non.ids) > 0)
+  (emms2 <- get_emmeans(pwc2))
+```
+
+```{r, echo=F, purl=F}
+if (length(non.ids) > 0)
+  kable(emms2, digits = 3)
+```
+
+
+
+```{r, dpi=300, fig.width=10, fig.height=6}
+if (length(non.ids) > 0) {
+  emms.gg <- emms2[which(emms2$gender == "Female"),]
+  if (nrow(emms.gg) > 0)
+    ggline(emms.gg, x = "time", y = "emmean", color = "#FF007F", ylab = "coerencia_tematica") +
+    geom_errorbar(aes(ymin = conf.low, ymax = conf.high),
+                  width = 0.2, color = "#FF007F") +
+    stat_pvalue_manual(
+      add_xy_position(pwc[which(pwc$gender == "Female"),],
+                      x = "time", fun = "mean_se"),
+      hide.ns = T, color = "#FF007F", tip.length = F) +
+    labs(title = "gender: Female") +
+    theme(legend.text = element_blank())
+}
+```
+
+
+```{r, dpi=300, fig.width=10, fig.height=6}
+if (length(non.ids) > 0) {
+  emms.gg <- emms2[which(emms2$gender == "Male"),]
+  if (nrow(emms.gg) > 0)
+    ggline(emms.gg, x = "time", y = "emmean", color = "#4D4DFF", ylab = "coerencia_tematica") +
+    geom_errorbar(aes(ymin = conf.low, ymax = conf.high),
+                  width = 0.2, color = "#4D4DFF") +
+    stat_pvalue_manual(
+      add_xy_position(pwc[which(pwc$gender == "Male"),],
+                      x = "time", fun = "mean_se"),
+      hide.ns = T, color = "#4D4DFF", tip.length = F) +
+    labs(title = "gender: Male") +
+    theme(legend.text = element_blank())
+}
+```
+
+
+# ANOVA: coerencia_tematica ~ time*regiao + Error(id/time) 
+
+## Data Preparation
+
+```{r}
+data <- edat[,c("aluno_id","regiao","ciclo","coerencia_tematica")]
+data <- data[data$ciclo %in% c("Primeiro Ciclo","Segundo Ciclo"),]
+data$ciclo <- factor(data$ciclo, c("Primeiro Ciclo","Segundo Ciclo"))
+data <- unique(data)
+
+wdat <- spread(data, ciclo, coerencia_tematica)
+wdat <- wdat[complete.cases(wdat),]
+colnames(wdat) <- c("id","regiao","c1","c2")
+
+ldat <- gather(wdat, key = time, value = coerencia_tematica, c1,c2) %>%
+  convert_as_factor(id, time)
+ldat <- remove_group_data(ldat, "coerencia_tematica", c("time", "regiao"), n.limit = 30)
+ldat$regiao <- factor(ldat$regiao, sort(unique(ldat$regiao)))
+```
+
+### Check assumptions: Identifying Outliers
+
+```{r}
+outliers <- identify_outliers(group_by(ldat, time, regiao), coerencia_tematica)
+(outliers <- outliers[outliers$is.extreme == T,])
+```
+
+```{r, echo=F, purl=F}
+kable(outliers, digits = 3)
+```
+
+### Check assumptions: Normality Test
+
+```{r}
+(normality.df <- normality.test.per.groups(ldat, "coerencia_tematica", c("time", "regiao")))
+```
+
+```{r, echo=F, purl=F}
+kable(normality.df, digits = 3)
+```
+
+```{r}
+(non.ids <- unique(do.call(
+  c, lapply(which(normality.df$normality == 'NO'), FUN = function(i) {
+  idx = which(ldat$time == normality.df$time[i] &
+                ldat$regiao == normality.df$regiao[i])
+  getNonNormal(ldat$"coerencia_tematica"[idx], ldat$id[idx])
+}))))
+```
+
+```{r}
+if (length(non.ids) > 0)
+  ldat2 <- ldat[!ldat$id %in% non.ids,]
+```
+
+### Summary Statistics
+
+```{r}
+(sdat <- ldat %>% group_by(time, regiao) %>%
+   get_summary_stats(coerencia_tematica, type = "mean_sd"))
+```
+
+```{r, echo=F, purl=F}
+kable(sdat, digits = 3)
+```
+
+
+```{r}
+if (length(non.ids) > 0)
+  (sdat <- ldat2 %>% group_by(time, regiao) %>%
+      get_summary_stats(coerencia_tematica, type = "mean_sd"))
+```
+
+
+```{r, echo=F, purl=F}
+kable(sdat, digits = 3)
+```
+
+## ANOVA Computation
+
+```{r}
+(res.aov <- anova_test(ldat, dv = coerencia_tematica, wid = id, between = regiao, within = time))
+```
+
+```{r, echo=F, purl=F}
+kable(res.aov$ANOVA, digits = 3)
+```
+
+```{r, echo=F, purl=F}
+kable(res.aov$`Mauchly's Test for Sphericity`, digits = 3)
+```
+
+```{r, echo=F, purl=F}
+kable(res.aov$`Sphericity Corrections`, digits = 3)
+```
+
+## ANOVA Computation after removing non.normal data
+
+
+```{r}
+if (length(non.ids) > 0)
+  (res.aov2 <- anova_test(ldat2, dv = coerencia_tematica, wid = id, between = regiao , within = time))
+```
+
+```{r, echo=F, purl=F}
+if (length(non.ids) > 0)
+  kable(res.aov2$ANOVA, digits = 3)
+```
+
+```{r, echo=F, purl=F}
+if (length(non.ids) > 0)
+  kable(res.aov2$`Mauchly's Test for Sphericity`, digits = 3)
+```
+
+```{r, echo=F, purl=F}
+if (length(non.ids) > 0)
+  kable(res.aov2$`Sphericity Corrections`, digits = 3)
+```
+
+
+## PairWise Computation
+
+```{r}
+(pwc <- ldat %>% group_by(time) %>%
+   emmeans_test(coerencia_tematica ~ regiao, detailed = T, p.adjust.method = "bonferroni"))
+```
+
+```{r, echo=F, purl=F}
+kable(pwc, digits = 3)
+```
+
+```{r}
+(emms <- get_emmeans(pwc))
+```
+
+```{r, echo=F, purl=F}
+kable(emms, digits = 3)
+```
+
+```{r, dpi=300, fig.width=10, fig.height=6}
+pwc <- add_xy_position(pwc, x = "time", fun = "mean_se", dodge = 0.25)
+pd <- position_dodge(width = 0.25)
+ggline(emms, x = "time", y = "emmean", color = "regiao",
+       palette = c("#0073C2FF","#EFC000FF","#868686FF","#CD534CFF","#7AA6DCFF"),
+       position = pd, ylab = "coerencia_tematica") +
+  geom_errorbar(aes(ymin = conf.low, ymax = conf.high, color = regiao),
+                position = pd, width = 0.2) +
+  stat_pvalue_manual(pwc, hide.ns = T, tip.length = F, linetype = 1)
+```
+
+
+```{r}
+(pwc <- ldat %>% group_by(regiao) %>%
+    emmeans_test(coerencia_tematica ~ time, detailed = T, p.adjust.method = "bonferroni"))
+```
+
+```{r, echo=F, purl=F}
+kable(pwc, digits = 3)
+```
+
+```{r}
+(emms <- get_emmeans(pwc))
+```
+
+```{r, echo=F, purl=F}
+kable(emms, digits = 3)
+```
+
+
+
+```{r, dpi=300, fig.width=10, fig.height=6}
+emms.gg <- emms[which(emms$regiao == "Centro-Oeste"),]
+if (nrow(emms.gg) > 0)
+  ggline(emms.gg, x = "time", y = "emmean", color = "#0073C2FF", ylab = "coerencia_tematica") +
+    geom_errorbar(aes(ymin = conf.low, ymax = conf.high),
+                  width = 0.2, color = "#0073C2FF") +
+    stat_pvalue_manual(
+      add_xy_position(pwc[which(pwc$regiao == "Centro-Oeste"),],
+                      x = "time", fun = "mean_se"),
+      hide.ns = T, color = "#0073C2FF", tip.length = F) +
+    labs(title = "regiao: Centro-Oeste")+
+    theme(legend.text = element_blank())
+```
+
+
+```{r, dpi=300, fig.width=10, fig.height=6}
+emms.gg <- emms[which(emms$regiao == "Nordeste"),]
+if (nrow(emms.gg) > 0)
+  ggline(emms.gg, x = "time", y = "emmean", color = "#EFC000FF", ylab = "coerencia_tematica") +
+    geom_errorbar(aes(ymin = conf.low, ymax = conf.high),
+                  width = 0.2, color = "#EFC000FF") +
+    stat_pvalue_manual(
+      add_xy_position(pwc[which(pwc$regiao == "Nordeste"),],
+                      x = "time", fun = "mean_se"),
+      hide.ns = T, color = "#EFC000FF", tip.length = F) +
+    labs(title = "regiao: Nordeste")+
+    theme(legend.text = element_blank())
+```
+
+
+```{r, dpi=300, fig.width=10, fig.height=6}
+emms.gg <- emms[which(emms$regiao == "Norte"),]
+if (nrow(emms.gg) > 0)
+  ggline(emms.gg, x = "time", y = "emmean", color = "#868686FF", ylab = "coerencia_tematica") +
+    geom_errorbar(aes(ymin = conf.low, ymax = conf.high),
+                  width = 0.2, color = "#868686FF") +
+    stat_pvalue_manual(
+      add_xy_position(pwc[which(pwc$regiao == "Norte"),],
+                      x = "time", fun = "mean_se"),
+      hide.ns = T, color = "#868686FF", tip.length = F) +
+    labs(title = "regiao: Norte")+
+    theme(legend.text = element_blank())
+```
+
+
+```{r, dpi=300, fig.width=10, fig.height=6}
+emms.gg <- emms[which(emms$regiao == "Sudeste"),]
+if (nrow(emms.gg) > 0)
+  ggline(emms.gg, x = "time", y = "emmean", color = "#CD534CFF", ylab = "coerencia_tematica") +
+    geom_errorbar(aes(ymin = conf.low, ymax = conf.high),
+                  width = 0.2, color = "#CD534CFF") +
+    stat_pvalue_manual(
+      add_xy_position(pwc[which(pwc$regiao == "Sudeste"),],
+                      x = "time", fun = "mean_se"),
+      hide.ns = T, color = "#CD534CFF", tip.length = F) +
+    labs(title = "regiao: Sudeste")+
+    theme(legend.text = element_blank())
+```
+
+
+```{r, dpi=300, fig.width=10, fig.height=6}
+emms.gg <- emms[which(emms$regiao == "Sul"),]
+if (nrow(emms.gg) > 0)
+  ggline(emms.gg, x = "time", y = "emmean", color = "#7AA6DCFF", ylab = "coerencia_tematica") +
+    geom_errorbar(aes(ymin = conf.low, ymax = conf.high),
+                  width = 0.2, color = "#7AA6DCFF") +
+    stat_pvalue_manual(
+      add_xy_position(pwc[which(pwc$regiao == "Sul"),],
+                      x = "time", fun = "mean_se"),
+      hide.ns = T, color = "#7AA6DCFF", tip.length = F) +
+    labs(title = "regiao: Sul")+
+    theme(legend.text = element_blank())
+```
+
+
+
+## PairWise Computation after removing non.normal data
+
+
+```{r}
+if (length(non.ids) > 0)
+  (pwc2 <- ldat2 %>% group_by(time) %>%
+     emmeans_test(coerencia_tematica ~ regiao, detailed = T, p.adjust.method = "bonferroni"))
+```
+
+```{r, echo=F, purl=F}
+if (length(non.ids) > 0)
+  kable(pwc2, digits = 3)
+```
+
+```{r}
+if (length(non.ids) > 0)
+  (emms2 <- get_emmeans(pwc2))
+```
+
+```{r, echo=F, purl=F}
+if (length(non.ids) > 0)
+  kable(emms2, digits = 3)
+```
+
+```{r, dpi=300, fig.width=10, fig.height=6}
+if (length(non.ids) > 0) {
+  pwc2 <- add_xy_position(pwc2, x = "time", fun = "mean_se", dodge = 0.25)
+  pd2 <- position_dodge(width = 0.25)
+  
+  ggline(emms2, x = "time", y = "emmean", color = "regiao",
+         palette = c("#0073C2FF","#EFC000FF","#868686FF","#CD534CFF","#7AA6DCFF"),
+         position = pd, ylab = "coerencia_tematica") +
+    geom_errorbar(aes(ymin = conf.low, ymax = conf.high, color = regiao),
+                position = pd, width = 0.2) +
+    stat_pvalue_manual(pwc2, hide.ns = T, tip.length = F, linetype = 1)
+}
+```
+
+
+```{r}
+if (length(non.ids) > 0)
+  (pwc2 <- ldat2 %>% group_by(regiao) %>%
+     emmeans_test(coerencia_tematica ~ time, detailed = T, p.adjust.method = "bonferroni"))
+```
+
+```{r, echo=F, purl=F}
+if (length(non.ids) > 0)
+  kable(pwc2, digits = 3)
+```
+
+```{r}
+if (length(non.ids) > 0)
+  (emms2 <- get_emmeans(pwc2))
+```
+
+```{r, echo=F, purl=F}
+if (length(non.ids) > 0)
+  kable(emms2, digits = 3)
+```
+
+
+
+```{r, dpi=300, fig.width=10, fig.height=6}
+if (length(non.ids) > 0) {
+  emms.gg <- emms2[which(emms2$regiao == "Centro-Oeste"),]
+  if (nrow(emms.gg) > 0)
+    ggline(emms.gg, x = "time", y = "emmean", color = "#0073C2FF", ylab = "coerencia_tematica") +
+    geom_errorbar(aes(ymin = conf.low, ymax = conf.high),
+                  width = 0.2, color = "#0073C2FF") +
+    stat_pvalue_manual(
+      add_xy_position(pwc[which(pwc$regiao == "Centro-Oeste"),],
+                      x = "time", fun = "mean_se"),
+      hide.ns = T, color = "#0073C2FF", tip.length = F) +
+    labs(title = "regiao: Centro-Oeste") +
+    theme(legend.text = element_blank())
+}
+```
+
+
+```{r, dpi=300, fig.width=10, fig.height=6}
+if (length(non.ids) > 0) {
+  emms.gg <- emms2[which(emms2$regiao == "Nordeste"),]
+  if (nrow(emms.gg) > 0)
+    ggline(emms.gg, x = "time", y = "emmean", color = "#EFC000FF", ylab = "coerencia_tematica") +
+    geom_errorbar(aes(ymin = conf.low, ymax = conf.high),
+                  width = 0.2, color = "#EFC000FF") +
+    stat_pvalue_manual(
+      add_xy_position(pwc[which(pwc$regiao == "Nordeste"),],
+                      x = "time", fun = "mean_se"),
+      hide.ns = T, color = "#EFC000FF", tip.length = F) +
+    labs(title = "regiao: Nordeste") +
+    theme(legend.text = element_blank())
+}
+```
+
+
+```{r, dpi=300, fig.width=10, fig.height=6}
+if (length(non.ids) > 0) {
+  emms.gg <- emms2[which(emms2$regiao == "Norte"),]
+  if (nrow(emms.gg) > 0)
+    ggline(emms.gg, x = "time", y = "emmean", color = "#868686FF", ylab = "coerencia_tematica") +
+    geom_errorbar(aes(ymin = conf.low, ymax = conf.high),
+                  width = 0.2, color = "#868686FF") +
+    stat_pvalue_manual(
+      add_xy_position(pwc[which(pwc$regiao == "Norte"),],
+                      x = "time", fun = "mean_se"),
+      hide.ns = T, color = "#868686FF", tip.length = F) +
+    labs(title = "regiao: Norte") +
+    theme(legend.text = element_blank())
+}
+```
+
+
+```{r, dpi=300, fig.width=10, fig.height=6}
+if (length(non.ids) > 0) {
+  emms.gg <- emms2[which(emms2$regiao == "Sudeste"),]
+  if (nrow(emms.gg) > 0)
+    ggline(emms.gg, x = "time", y = "emmean", color = "#CD534CFF", ylab = "coerencia_tematica") +
+    geom_errorbar(aes(ymin = conf.low, ymax = conf.high),
+                  width = 0.2, color = "#CD534CFF") +
+    stat_pvalue_manual(
+      add_xy_position(pwc[which(pwc$regiao == "Sudeste"),],
+                      x = "time", fun = "mean_se"),
+      hide.ns = T, color = "#CD534CFF", tip.length = F) +
+    labs(title = "regiao: Sudeste") +
+    theme(legend.text = element_blank())
+}
+```
+
+
+```{r, dpi=300, fig.width=10, fig.height=6}
+if (length(non.ids) > 0) {
+  emms.gg <- emms2[which(emms2$regiao == "Sul"),]
+  if (nrow(emms.gg) > 0)
+    ggline(emms.gg, x = "time", y = "emmean", color = "#7AA6DCFF", ylab = "coerencia_tematica") +
+    geom_errorbar(aes(ymin = conf.low, ymax = conf.high),
+                  width = 0.2, color = "#7AA6DCFF") +
+    stat_pvalue_manual(
+      add_xy_position(pwc[which(pwc$regiao == "Sul"),],
+                      x = "time", fun = "mean_se"),
+      hide.ns = T, color = "#7AA6DCFF", tip.length = F) +
+    labs(title = "regiao: Sul") +
+    theme(legend.text = element_blank())
+}
+```
+
+
+
+
