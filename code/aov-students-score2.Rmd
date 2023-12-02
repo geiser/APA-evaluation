@@ -1,0 +1,1021 @@
+---
+title: "ANOVA test for score2"
+author: Geiser C. Challco <geiser@alumni.usp.br>
+comment: ANOVA test to determine whether there were significant differences.
+         
+         Author - Geiser C. Challco <geiser@alumni.usp.br>
+         
+         Shiny-Statistic is distributed in the hope that it will be useful,
+         but WITHOUT ANY WARRANTY; without even the implied warranty of
+         MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+         GNU General Public License for more details.
+         
+         You should have received a copy of the GNU General Public License.
+         This file is  generate using Shiny-Statistic app (https://github.com/geiser/rshinystatistics)
+         If not, see <https://www.gnu.org/licenses/>.
+output:
+  github_document:
+    toc: true
+  word_document:
+    toc: true
+  html_document:
+    toc: true
+fontsize: 10pt
+---
+
+
+```{r setup, include=FALSE}
+# Install and Load Packages
+
+if (!'remotes' %in% rownames(installed.packages())) install.packages('remotes')
+if (!"rshinystatistics" %in% rownames(installed.packages())) {
+  remotes::install_github("geiser/rshinystatistics")
+} else if (packageVersion("rshinystatistics") < "0.0.0.9900") {
+  remotes::install_github("geiser/rshinystatistics")
+}
+
+wants <- c('ggplot2','ggpubr','rshinystatistics','rstatix','utils','randomcoloR')
+has <- wants %in% rownames(installed.packages())
+if (any(!has)) install.packages(wants[!has])
+
+library(shiny)
+library(esquisse)
+library(scales)
+library(knitr)
+library(rmarkdown)
+
+library(utils)
+library(ggpubr)
+library(ggplot2)
+library(randomcoloR)
+
+library(rshinystatistics)
+library(rstatix)
+
+library(readxl)
+```
+
+```{r}
+dat <- read_excel("../data/data.xlsx", sheet = "alunos_ef14")
+
+escolas <- read_excel("../data/data.xlsx", sheet = "escolas")
+edat <- merge(dat, escolas, by = "cod_escola", all.x = T)
+```
+
+
+# ANOVA: score2 ~ time
+
+## Data Preparation
+
+```{r}
+data <- edat[,c("aluno_id","ciclo","score2")]
+data <- data[data$ciclo %in% c("Primeiro Ciclo","Segundo Ciclo","Terceiro Ciclo", "Quarto Ciclo"),]
+data$ciclo <- factor(data$ciclo, c("Primeiro Ciclo","Segundo Ciclo","Terceiro Ciclo", "Quarto Ciclo"))
+data <- unique(data)
+
+wdat <- spread(data, ciclo, score2)
+colnames(wdat) <- c("id","c1","c2","c3","c4")
+wdat <- wdat[complete.cases(wdat[,c("id","c1","c2","c3")]),]
+
+ldat <- gather(wdat, key = time, value = score2, c1,c2,c3,c4) %>%
+  convert_as_factor(id, time)
+ldat <- rshinystatistics::remove_group_data(ldat, "score2", "time", n.limit = 30)
+```
+
+## Summary Statistics
+
+```{r}
+(sdat <- get.descriptives(ldat, "score2", "time", symmetry.test = T, normality.test = T))
+```
+
+```{r, echo=F, purl=F}
+kable(sdat, digits = 3)
+```
+
+## ANOVA Computation
+
+
+```{r}
+(res.aov <- anova_test(ldat, dv = score2, wid = id, within = time))
+```
+
+```{r, echo=F, purl=F}
+kable(res.aov$ANOVA, digits = 3)
+```
+
+```{r, echo=F, purl=F}
+kable(res.aov$`Mauchly's Test for Sphericity`, digits = 3)
+```
+
+```{r, echo=F, purl=F}
+kable(res.aov$`Sphericity Corrections`, digits = 3)
+```
+
+## PairWise Computation
+
+```{r}
+(pwc <- ldat %>% emmeans_test(score2 ~ time, detailed = T, p.adjust.method = "bonferroni"))
+```
+
+```{r, echo=F, purl=F}
+kable(pwc, digits = 3)
+```
+
+```{r, dpi=300, fig.width=10, fig.height=6}
+pwc <- add_xy_position(pwc, x = "time", fun = "mean_se")
+ggline(get_emmeans(pwc), x = "time", y = "emmean", ylab = "score2", size = 1) +
+  geom_errorbar(aes(ymin = conf.low, ymax = conf.high), width = 0.1, linewidth = 1) +
+  stat_pvalue_manual(pwc, hide.ns = T, tip.length = F)
+```
+
+
+
+
+# ANOVA: score2 ~ time*gender + Error(id/time) 
+
+## Data Preparation
+
+```{r}
+data <- edat[,c("aluno_id","gender","ciclo","score2")]
+data <- data[data$ciclo %in% c("Primeiro Ciclo","Segundo Ciclo","Terceiro Ciclo","Quarto Ciclo"),]
+data$ciclo <- factor(data$ciclo, c("Primeiro Ciclo","Segundo Ciclo","Terceiro Ciclo","Quarto Ciclo"))
+data <- unique(data)
+
+wdat <- spread(data, ciclo, score2)
+colnames(wdat) <- c("id","gender","c1","c2","c3","c4")
+wdat <- wdat[complete.cases(wdat[,c("id","gender","c1","c2","c3")]),]
+
+ldat <- gather(wdat, key = time, value = score2, c1,c2,c3,c4) %>%
+  convert_as_factor(id, time)
+ldat <- remove_group_data(ldat, "score2", c("time", "gender"), n.limit = 30)
+ldat$gender <- factor(ldat$gender, sort(unique(ldat$gender)))
+```
+
+### Check assumptions: Identifying Outliers
+
+```{r}
+outliers <- identify_outliers(group_by(ldat, time, gender), score2)
+(outliers <- outliers[outliers$is.extreme == T,])
+```
+
+```{r, echo=F, purl=F}
+kable(outliers, digits = 3)
+```
+
+### Check assumptions: Normality Test
+
+```{r}
+(normality.df <- get.descriptives(ldat, "score2", c("time", "gender"), symmetry.test = T, normality.test = T))
+```
+
+```{r, echo=F, purl=F}
+kable(normality.df, digits = 3)
+```
+
+```{r}
+(non.ids <- unique(do.call(
+  c, lapply(which(normality.df$normality == 'NO'), FUN = function(i) {
+  idx = which(ldat$time == normality.df$time[i] &
+                ldat$gender == normality.df$gender[i])
+  getNonNormal(ldat$"score2"[idx], ldat$id[idx])
+}))))
+```
+
+```{r}
+if (length(non.ids) > 0)
+  ldat2 <- ldat[!ldat$id %in% non.ids,]
+```
+
+### Summary Statistics
+
+```{r}
+(sdat <- ldat %>% group_by(time, gender) %>%
+   get_summary_stats(score2, type = "mean_sd"))
+```
+
+```{r, echo=F, purl=F}
+kable(sdat, digits = 3)
+```
+
+
+```{r}
+if (length(non.ids) > 0)
+  (sdat <- ldat2 %>% group_by(time, gender) %>%
+      get_summary_stats(score2, type = "mean_sd"))
+```
+
+
+```{r, echo=F, purl=F}
+kable(sdat, digits = 3)
+```
+
+## ANOVA Computation
+
+```{r}
+(res.aov <- anova_test(ldat, dv = score2, wid = id, between = gender, within = time))
+```
+
+```{r, echo=F, purl=F}
+kable(res.aov$ANOVA, digits = 3)
+```
+
+```{r, echo=F, purl=F}
+kable(res.aov$`Mauchly's Test for Sphericity`, digits = 3)
+```
+
+```{r, echo=F, purl=F}
+kable(res.aov$`Sphericity Corrections`, digits = 3)
+```
+
+## ANOVA Computation after removing non.normal data
+
+
+```{r}
+if (length(non.ids) > 0)
+  (res.aov2 <- anova_test(ldat2, dv = score2, wid = id, between = gender , within = time))
+```
+
+```{r, echo=F, purl=F}
+if (length(non.ids) > 0)
+  kable(res.aov2$ANOVA, digits = 3)
+```
+
+```{r, echo=F, purl=F}
+if (length(non.ids) > 0)
+  kable(res.aov2$`Mauchly's Test for Sphericity`, digits = 3)
+```
+
+```{r, echo=F, purl=F}
+if (length(non.ids) > 0)
+  kable(res.aov2$`Sphericity Corrections`, digits = 3)
+```
+
+
+## PairWise Computation
+
+```{r}
+(pwc <- ldat %>% group_by(time) %>%
+   emmeans_test(score2 ~ gender, detailed = T, p.adjust.method = "bonferroni"))
+```
+
+```{r, echo=F, purl=F}
+kable(pwc, digits = 3)
+```
+
+```{r}
+(emms <- get_emmeans(pwc))
+```
+
+```{r, echo=F, purl=F}
+kable(emms, digits = 3)
+```
+
+```{r, dpi=300, fig.width=10, fig.height=6}
+pwc <- add_xy_position(pwc, x = "time", fun = "mean_se", dodge = 0.25)
+pd <- position_dodge(width = 0.25)
+ggline(emms, x = "time", y = "emmean", color = "gender", size = 1,
+       palette = c("#FF007F","#4D4DFF"),
+       position = pd, ylab = "score2") +
+  geom_errorbar(aes(ymin = conf.low, ymax = conf.high, color = gender),
+                position = pd, width = 0.1, linewidth = 1) +
+  stat_pvalue_manual(pwc, hide.ns = T, tip.length = F, linetype = 1)
+```
+
+
+```{r}
+(pwc <- ldat %>% group_by(gender) %>%
+    emmeans_test(score2 ~ time, detailed = T, p.adjust.method = "bonferroni"))
+```
+
+```{r, echo=F, purl=F}
+kable(pwc, digits = 3)
+```
+
+```{r}
+(emms <- get_emmeans(pwc))
+```
+
+```{r, echo=F, purl=F}
+kable(emms, digits = 3)
+```
+
+
+
+```{r, dpi=300, fig.width=10, fig.height=6}
+emms.gg <- emms[which(emms$gender == "Female"),]
+if (nrow(emms.gg) > 0)
+  ggline(emms.gg, x = "time", y = "emmean", color = "#FF007F", ylab = "score2", size = 1) +
+    geom_errorbar(aes(ymin = conf.low, ymax = conf.high),
+                  width = 0.1, color = "#FF007F", linewidth = 1) +
+    stat_pvalue_manual(
+      add_xy_position(pwc[which(pwc$gender == "Female"),],
+                      x = "time", fun = "mean_se"),
+      hide.ns = T, color = "#FF007F", tip.length = F) +
+    theme(legend.text = element_blank())
+```
+
+
+```{r, dpi=300, fig.width=10, fig.height=6}
+emms.gg <- emms[which(emms$gender == "Male"),]
+if (nrow(emms.gg) > 0)
+  ggline(emms.gg, x = "time", y = "emmean", color = "#4D4DFF", ylab = "score2", size = 1) +
+    geom_errorbar(aes(ymin = conf.low, ymax = conf.high),
+                  width = 0.1, color = "#4D4DFF", linewidth = 1) +
+    stat_pvalue_manual(
+      add_xy_position(pwc[which(pwc$gender == "Male"),],
+                      x = "time", fun = "mean_se"),
+      hide.ns = T, color = "#4D4DFF", tip.length = F) +
+    theme(legend.text = element_blank())
+```
+
+
+
+# ANOVA: score2 ~ time*localizacao + Error(id/time) 
+
+## Data Preparation
+
+```{r}
+data <- edat[,c("aluno_id","localizacao","ciclo","score2")]
+data <- data[data$ciclo %in% c("Primeiro Ciclo","Segundo Ciclo","Terceiro Ciclo","Quarto Ciclo"),]
+data$ciclo <- factor(data$ciclo, c("Primeiro Ciclo","Segundo Ciclo","Terceiro Ciclo","Quarto Ciclo"))
+data <- unique(data)
+
+wdat <- spread(data, ciclo, score2)
+colnames(wdat) <- c("id","localizacao","c1","c2","c3","c4")
+wdat <- wdat[complete.cases(wdat[,c("id","localizacao","c1","c2","c3")]),]
+
+ldat <- gather(wdat, key = time, value = score2, c1,c2,c3,c4) %>%
+  convert_as_factor(id, time)
+ldat <- remove_group_data(ldat, "score2", c("time", "localizacao"), n.limit = 30)
+ldat$localizacao <- factor(ldat$localizacao, sort(unique(ldat$localizacao)))
+```
+
+### Check assumptions: Identifying Outliers
+
+```{r}
+outliers <- identify_outliers(group_by(ldat, time, localizacao), score2)
+(outliers <- outliers[outliers$is.extreme == T,])
+```
+
+```{r, echo=F, purl=F}
+kable(outliers, digits = 3)
+```
+
+### Check assumptions: Normality Test
+
+```{r}
+(normality.df <- get.descriptives(ldat, "score2", c("time", "localizacao"), symmetry.test = T, normality.test = T))
+```
+
+```{r, echo=F, purl=F}
+kable(normality.df, digits = 3)
+```
+
+```{r}
+(non.ids <- unique(do.call(
+  c, lapply(which(normality.df$normality == 'NO'), FUN = function(i) {
+  idx = which(ldat$time == normality.df$time[i] &
+                ldat$localizacao == normality.df$localizacao[i])
+  getNonNormal(ldat$"score2"[idx], ldat$id[idx])
+}))))
+```
+
+```{r}
+if (length(non.ids) > 0)
+  ldat2 <- ldat[!ldat$id %in% non.ids,]
+```
+
+### Summary Statistics
+
+```{r}
+(sdat <- ldat %>% group_by(time, localizacao) %>%
+   get_summary_stats(score2, type = "mean_sd"))
+```
+
+```{r, echo=F, purl=F}
+kable(sdat, digits = 3)
+```
+
+
+```{r}
+if (length(non.ids) > 0)
+  (sdat <- ldat2 %>% group_by(time, localizacao) %>%
+      get_summary_stats(score2, type = "mean_sd"))
+```
+
+
+```{r, echo=F, purl=F}
+kable(sdat, digits = 3)
+```
+
+## ANOVA Computation
+
+```{r}
+(res.aov <- anova_test(ldat, dv = score2, wid = id, between = localizacao, within = time))
+```
+
+```{r, echo=F, purl=F}
+kable(res.aov$ANOVA, digits = 3)
+```
+
+```{r, echo=F, purl=F}
+kable(res.aov$`Mauchly's Test for Sphericity`, digits = 3)
+```
+
+```{r, echo=F, purl=F}
+kable(res.aov$`Sphericity Corrections`, digits = 3)
+```
+
+## ANOVA Computation after removing non.normal data
+
+
+```{r}
+if (length(non.ids) > 0)
+  (res.aov2 <- anova_test(ldat2, dv = score2, wid = id, between = localizacao , within = time))
+```
+
+```{r, echo=F, purl=F}
+if (length(non.ids) > 0)
+  kable(res.aov2$ANOVA, digits = 3)
+```
+
+```{r, echo=F, purl=F}
+if (length(non.ids) > 0)
+  kable(res.aov2$`Mauchly's Test for Sphericity`, digits = 3)
+```
+
+```{r, echo=F, purl=F}
+if (length(non.ids) > 0)
+  kable(res.aov2$`Sphericity Corrections`, digits = 3)
+```
+
+
+## PairWise Computation
+
+```{r}
+(pwc <- ldat %>% group_by(time) %>%
+   emmeans_test(score2 ~ localizacao, detailed = T, p.adjust.method = "bonferroni"))
+```
+
+```{r, echo=F, purl=F}
+kable(pwc, digits = 3)
+```
+
+```{r}
+(emms <- get_emmeans(pwc))
+```
+
+```{r, echo=F, purl=F}
+kable(emms, digits = 3)
+```
+
+```{r, dpi=300, fig.width=10, fig.height=6}
+pwc <- add_xy_position(pwc, x = "time", fun = "mean_se", dodge = 0.25)
+pd <- position_dodge(width = 0.25)
+ggline(emms, x = "time", y = "emmean", color = "localizacao",
+       palette = c("#AA00FF","#00CCCC"), size = 1,
+       position = pd, ylab = "score2") +
+  geom_errorbar(aes(ymin = conf.low, ymax = conf.high, color = localizacao),
+                position = pd, width = 0.1, linewidth = 1) +
+  stat_pvalue_manual(pwc, hide.ns = T, tip.length = F, linetype = 1)
+```
+
+
+```{r}
+(pwc <- ldat %>% group_by(localizacao) %>%
+    emmeans_test(score2 ~ time, detailed = T, p.adjust.method = "bonferroni"))
+```
+
+```{r, echo=F, purl=F}
+kable(pwc, digits = 3)
+```
+
+```{r}
+(emms <- get_emmeans(pwc))
+```
+
+```{r, echo=F, purl=F}
+kable(emms, digits = 3)
+```
+
+
+
+```{r, dpi=300, fig.width=10, fig.height=6}
+emms.gg <- emms[which(emms$localizacao == "Rural"),]
+if (nrow(emms.gg) > 0)
+  ggline(emms.gg, x = "time", y = "emmean", color = "#AA00FF", ylab = "score2", size = 1) +
+    geom_errorbar(aes(ymin = conf.low, ymax = conf.high),
+                  width = 0.1, color = "#AA00FF", linewidth = 1) +
+    stat_pvalue_manual(
+      add_xy_position(pwc[which(pwc$localizacao == "Rural"),],
+                      x = "time", fun = "mean_se"),
+      hide.ns = T, color = "#AA00FF", tip.length = F) +
+    theme(legend.text = element_blank())
+```
+
+
+```{r, dpi=300, fig.width=10, fig.height=6}
+emms.gg <- emms[which(emms$localizacao == "Urbana"),]
+if (nrow(emms.gg) > 0)
+  ggline(emms.gg, x = "time", y = "emmean", color = "#00CCCC", ylab = "score2", size = 1) +
+    geom_errorbar(aes(ymin = conf.low, ymax = conf.high), linewidth = 1,
+                  width = 0.1, color = "#00CCCC") +
+    stat_pvalue_manual(
+      add_xy_position(pwc[which(pwc$localizacao == "Urbana"),],
+                      x = "time", fun = "mean_se"),
+      hide.ns = T, color = "#00CCCC", tip.length = F) +
+    theme(legend.text = element_blank())
+```
+
+
+
+
+
+# ANOVA: score2 ~ time*regiao + Error(id/time) 
+
+## Data Preparation
+
+```{r}
+data <- edat[,c("aluno_id","regiao","ciclo","score2")]
+data <- data[data$ciclo %in% c("Primeiro Ciclo","Segundo Ciclo","Terceiro Ciclo","Quarto Ciclo"),]
+data$ciclo <- factor(data$ciclo, c("Primeiro Ciclo","Segundo Ciclo","Terceiro Ciclo","Quarto Ciclo"))
+data <- unique(data)
+
+wdat <- spread(data, ciclo, score2)
+colnames(wdat) <- c("id","regiao","c1","c2","c3","c4")
+wdat <- wdat[complete.cases(wdat[,c("id","regiao","c1","c2","c3")]),]
+
+ldat <- gather(wdat, key = time, value = score2, c1,c2,c3,c4) %>%
+  convert_as_factor(id, time)
+ldat <- remove_group_data(ldat, "score2", c("time", "regiao"), n.limit = 30)
+ldat$regiao <- factor(ldat$regiao, sort(unique(ldat$regiao)))
+```
+
+
+
+### Check assumptions: Identifying Outliers
+
+```{r}
+outliers <- identify_outliers(group_by(ldat, time, regiao), score2)
+(outliers <- outliers[outliers$is.extreme == T,])
+```
+
+```{r, echo=F, purl=F}
+kable(outliers, digits = 3)
+```
+
+### Check assumptions: Normality Test
+
+```{r}
+(normality.df <- get.descriptives(ldat, "score2", c("time", "regiao"), symmetry.test = T, normality.test = T))
+```
+
+```{r, echo=F, purl=F}
+kable(normality.df, digits = 3)
+```
+
+```{r}
+idx = which(!ldat$id %in% outliers$id & ldat$regiao == "Norte" & ldat$time == "c4")
+non.ids = getNonNormal(ldat$score2[idx], ldat$id[idx])
+
+idx = which(!ldat$id %in% outliers$id & ldat$regiao == "Centro-Oeste" & ldat$time == "c4")
+non.ids =  unique(c(non.ids, getNonNormal(ldat$score2[idx], ldat$id[idx])))
+
+(non.ids)
+```
+
+
+```{r}
+if (length(non.ids) > 0)
+  ldat2 <- ldat[!ldat$id %in% non.ids,]
+```
+
+### Summary Statistics
+
+```{r}
+(sdat <- ldat %>% group_by(time, regiao) %>%
+   get_summary_stats(score2, type = "mean_sd"))
+```
+
+```{r, echo=F, purl=F}
+kable(sdat, digits = 3)
+```
+
+
+```{r}
+if (length(non.ids) > 0)
+  (sdat <- ldat2 %>% group_by(time, regiao) %>%
+      get_summary_stats(score2, type = "mean_sd"))
+```
+
+
+```{r, echo=F, purl=F}
+kable(sdat, digits = 3)
+```
+
+## ANOVA Computation
+
+```{r}
+(res.aov <- anova_test(ldat, dv = score2, wid = id, between = regiao, within = time))
+```
+
+```{r, echo=F, purl=F}
+kable(res.aov$ANOVA, digits = 3)
+```
+
+```{r, echo=F, purl=F}
+kable(res.aov$`Mauchly's Test for Sphericity`, digits = 3)
+```
+
+```{r, echo=F, purl=F}
+kable(res.aov$`Sphericity Corrections`, digits = 3)
+```
+
+## ANOVA Computation after removing non.normal data
+
+
+```{r}
+if (length(non.ids) > 0)
+  (res.aov2 <- anova_test(ldat2, dv = score2, wid = id, between = regiao , within = time))
+```
+
+```{r, echo=F, purl=F}
+if (length(non.ids) > 0)
+  kable(res.aov2$ANOVA, digits = 3)
+```
+
+```{r, echo=F, purl=F}
+if (length(non.ids) > 0)
+  kable(res.aov2$`Mauchly's Test for Sphericity`, digits = 3)
+```
+
+```{r, echo=F, purl=F}
+if (length(non.ids) > 0)
+  kable(res.aov2$`Sphericity Corrections`, digits = 3)
+```
+
+
+## PairWise Computation
+
+```{r}
+(pwc <- ldat %>% group_by(time) %>%
+   emmeans_test(score2 ~ regiao, detailed = T, p.adjust.method = "bonferroni"))
+```
+
+```{r, echo=F, purl=F}
+kable(pwc, digits = 3)
+```
+
+```{r}
+(emms <- get_emmeans(pwc))
+```
+
+```{r, echo=F, purl=F}
+kable(emms, digits = 3)
+```
+
+```{r, dpi=300, fig.width=10, fig.height=6}
+pwc <- add_xy_position(pwc, x = "time", fun = "mean_se", dodge = 0.25)
+pd <- position_dodge(width = 0.25)
+ggline(emms, x = "time", y = "emmean", color = "regiao", size = 1,
+       palette = c("#0073C2FF","#EFC000FF","#868686FF","#CD534CFF","#7AA6DCFF"),
+       position = pd, ylab = "score2") +
+  geom_errorbar(aes(ymin = conf.low, ymax = conf.high, color = regiao),
+                position = pd, width = 0.1, linewidth = 1) +
+  stat_pvalue_manual(pwc, hide.ns = T, tip.length = F, linetype = 1)
+```
+
+
+```{r}
+(pwc <- ldat %>% group_by(regiao) %>%
+    emmeans_test(score2 ~ time, detailed = T, p.adjust.method = "bonferroni"))
+```
+
+```{r, echo=F, purl=F}
+kable(pwc, digits = 3)
+```
+
+```{r}
+(emms <- get_emmeans(pwc))
+```
+
+```{r, echo=F, purl=F}
+kable(emms, digits = 3)
+```
+
+
+
+```{r, dpi=300, fig.width=10, fig.height=6}
+emms.gg <- emms[which(emms$regiao == "Centro-Oeste"),]
+if (nrow(emms.gg) > 0)
+  ggline(emms.gg, x = "time", y = "emmean", color = "#0073C2FF", ylab = "score2", size = 1) +
+    geom_errorbar(aes(ymin = conf.low, ymax = conf.high),
+                  width = 0.1, color = "#0073C2FF", linewidth = 1) +
+    stat_pvalue_manual(
+      add_xy_position(pwc[which(pwc$regiao == "Centro-Oeste"),],
+                      x = "time", fun = "mean_se"),
+      hide.ns = T, color = "#0073C2FF", tip.length = F) +
+    theme(legend.text = element_blank())
+```
+
+
+```{r, dpi=300, fig.width=10, fig.height=6}
+emms.gg <- emms[which(emms$regiao == "Nordeste"),]
+if (nrow(emms.gg) > 0)
+  ggline(emms.gg, x = "time", y = "emmean", color = "#EFC000FF", ylab = "score2", size = 1) +
+    geom_errorbar(aes(ymin = conf.low, ymax = conf.high),
+                  width = 0.1, color = "#EFC000FF", linewidth = 1) +
+    stat_pvalue_manual(
+      add_xy_position(pwc[which(pwc$regiao == "Nordeste"),],
+                      x = "time", fun = "mean_se"),
+      hide.ns = T, color = "#EFC000FF", tip.length = F) +
+    theme(legend.text = element_blank())
+```
+
+
+```{r, dpi=300, fig.width=10, fig.height=6}
+emms.gg <- emms[which(emms$regiao == "Norte"),]
+if (nrow(emms.gg) > 0)
+  ggline(emms.gg, x = "time", y = "emmean", color = "#868686FF", ylab = "score2", size = 1) +
+    geom_errorbar(aes(ymin = conf.low, ymax = conf.high),
+                  width = 0.1, color = "#868686FF", linewidth = 1) +
+    stat_pvalue_manual(
+      add_xy_position(pwc[which(pwc$regiao == "Norte"),],
+                      x = "time", fun = "mean_se"),
+      hide.ns = T, color = "#868686FF", tip.length = F) +
+    theme(legend.text = element_blank())
+```
+
+
+```{r, dpi=300, fig.width=10, fig.height=6}
+emms.gg <- emms[which(emms$regiao == "Sudeste"),]
+if (nrow(emms.gg) > 0)
+  ggline(emms.gg, x = "time", y = "emmean", color = "#CD534CFF", ylab = "score2", size = 1) +
+    geom_errorbar(aes(ymin = conf.low, ymax = conf.high),
+                  width = 0.1, color = "#CD534CFF", linewidth = 1) +
+    stat_pvalue_manual(
+      add_xy_position(pwc[which(pwc$regiao == "Sudeste"),],
+                      x = "time", fun = "mean_se"),
+      hide.ns = T, color = "#CD534CFF", tip.length = F) +
+    theme(legend.text = element_blank())
+```
+
+
+```{r, dpi=300, fig.width=10, fig.height=6}
+emms.gg <- emms[which(emms$regiao == "Sul"),]
+if (nrow(emms.gg) > 0)
+  ggline(emms.gg, x = "time", y = "emmean", color = "#7AA6DCFF", ylab = "score2", size = 1) +
+    geom_errorbar(aes(ymin = conf.low, ymax = conf.high),
+                  width = 0.1, color = "#7AA6DCFF", linewidth = 1) +
+    stat_pvalue_manual(
+      add_xy_position(pwc[which(pwc$regiao == "Sul"),],
+                      x = "time", fun = "mean_se"),
+      hide.ns = T, color = "#7AA6DCFF", tip.length = F) +
+    theme(legend.text = element_blank())
+```
+
+
+
+
+# ANOVA: score2 ~ time*porte + Error(id/time) 
+
+## Data Preparation
+
+
+```{r}
+data <- edat[,c("aluno_id","porte","ciclo","score2")]
+data <- data[data$ciclo %in% c("Primeiro Ciclo","Segundo Ciclo","Terceiro Ciclo","Quarto Ciclo"),]
+data$ciclo <- factor(data$ciclo, c("Primeiro Ciclo","Segundo Ciclo","Terceiro Ciclo","Quarto Ciclo"))
+data$porte <- factor(
+  data$porte,
+  levels = c(sort(unique(data$porte))[1],
+             sort(unique(data$porte))[4],
+             sort(unique(data$porte))[2],
+             sort(unique(data$porte))[3],
+             sort(unique(data$porte))[5]),
+  labels = c("Up to 50",
+             "Between 51 and 200",
+             "Between 201 and 500",
+             "Between 501 and 1000",
+             "More than 1000"))
+data <- unique(data)
+
+wdat <- spread(data, ciclo, score2)
+colnames(wdat) <- c("id","porte","c1","c2","c3","c4")
+wdat <- wdat[complete.cases(wdat[,c("id","porte","c1","c2","c3")]),]
+
+
+ldat <- gather(wdat, key = time, value = score2, c1,c2,c3,c4) %>%
+  convert_as_factor(id, time)
+ldat <- remove_group_data(ldat, "score2", c("time", "porte"), n.limit = 15)
+ldat$porte <- factor(ldat$porte, sort(unique(ldat$porte)))
+```
+
+### Check assumptions: Identifying Outliers
+
+```{r}
+outliers <- identify_outliers(group_by(ldat, time, porte), score2)
+(outliers <- outliers[outliers$is.extreme == T,])
+```
+
+```{r, echo=F, purl=F}
+kable(outliers, digits = 3)
+```
+
+### Check assumptions: Normality Test
+
+```{r}
+(normality.df <- get.descriptives(ldat, "score2", c("time", "porte"), symmetry.test = T, normality.test = T))
+```
+
+```{r, echo=F, purl=F}
+kable(normality.df, digits = 3)
+```
+
+```{r}
+idx = which(!ldat$id %in% outliers$id & ldat$porte == "Up to 50" & ldat$time == "c4")
+non.ids = getNonNormal(ldat$score2[idx], ldat$id[idx])
+
+(non.ids)
+```
+
+```{r}
+if (length(non.ids) > 0)
+  ldat2 <- ldat[!ldat$id %in% non.ids,]
+```
+
+### Summary Statistics
+
+```{r}
+(sdat <- ldat %>% group_by(time, porte) %>%
+   get_summary_stats(score2, type = "mean_sd"))
+```
+
+```{r, echo=F, purl=F}
+kable(sdat, digits = 3)
+```
+
+
+```{r}
+if (length(non.ids) > 0)
+  (sdat <- ldat2 %>% group_by(time, porte) %>%
+      get_summary_stats(score2, type = "mean_sd"))
+```
+
+
+```{r, echo=F, purl=F}
+kable(sdat, digits = 3)
+```
+
+## ANOVA Computation
+
+```{r}
+(res.aov <- anova_test(ldat, dv = score2, wid = id, between = porte, within = time))
+```
+
+```{r, echo=F, purl=F}
+kable(res.aov$ANOVA, digits = 3)
+```
+
+```{r, echo=F, purl=F}
+kable(res.aov$`Mauchly's Test for Sphericity`, digits = 3)
+```
+
+```{r, echo=F, purl=F}
+kable(res.aov$`Sphericity Corrections`, digits = 3)
+```
+
+## ANOVA Computation after removing non.normal data
+
+
+```{r}
+if (length(non.ids) > 0)
+  (res.aov2 <- anova_test(ldat2, dv = score2, wid = id, between = porte , within = time))
+```
+
+```{r, echo=F, purl=F}
+if (length(non.ids) > 0)
+  kable(res.aov2$ANOVA, digits = 3)
+```
+
+```{r, echo=F, purl=F}
+if (length(non.ids) > 0)
+  kable(res.aov2$`Mauchly's Test for Sphericity`, digits = 3)
+```
+
+```{r, echo=F, purl=F}
+if (length(non.ids) > 0)
+  kable(res.aov2$`Sphericity Corrections`, digits = 3)
+```
+
+
+## PairWise Computation
+
+```{r}
+(pwc <- ldat %>% group_by(time) %>%
+   emmeans_test(score2 ~ porte, detailed = T, p.adjust.method = "bonferroni"))
+```
+
+```{r, echo=F, purl=F}
+kable(pwc, digits = 3)
+```
+
+```{r}
+(emms <- get_emmeans(pwc))
+```
+
+```{r, echo=F, purl=F}
+kable(emms, digits = 3)
+```
+
+```{r, dpi=300, fig.width=10, fig.height=6}
+pwc <- add_xy_position(pwc, x = "time", fun = "mean_se", dodge = 0.25)
+pd <- position_dodge(width = 0.25)
+ggline(emms, x = "time", y = "emmean", color = "porte", size = 1,
+       palette = c("#0073C2FF","#EFC000FF","#868686FF","#CD534CFF","#7AA6DCFF"),
+       position = pd, ylab = "score2") +
+  geom_errorbar(aes(ymin = conf.low, ymax = conf.high, color = porte),
+                position = pd, width = 0.1, linewidth = 1) +
+  stat_pvalue_manual(pwc, hide.ns = T, tip.length = F, linetype = 1)
+```
+
+
+```{r}
+(pwc <- ldat %>% group_by(porte) %>%
+    emmeans_test(score2 ~ time, detailed = T, p.adjust.method = "bonferroni"))
+```
+
+```{r, echo=F, purl=F}
+kable(pwc, digits = 3)
+```
+
+```{r}
+(emms <- get_emmeans(pwc))
+```
+
+```{r, echo=F, purl=F}
+kable(emms, digits = 3)
+```
+
+
+```{r, dpi=300, fig.width=10, fig.height=6}
+emms.gg <- emms[which(emms$porte == "Up to 50"),]
+if (nrow(emms.gg) > 0)
+  ggline(emms.gg, x = "time", y = "emmean", color = "#0073C2FF", ylab = "score2", size = 1) +
+    geom_errorbar(aes(ymin = conf.low, ymax = conf.high),
+                  width = 0.1, color = "#0073C2FF", linewidth = 1) +
+    stat_pvalue_manual(
+      add_xy_position(pwc[which(pwc$porte == "Up to 50"),],
+                      x = "time", fun = "mean_se"),
+      hide.ns = T, color = "#0073C2FF", tip.length = F) +
+    theme(legend.text = element_blank())
+```
+
+
+
+
+```{r, dpi=300, fig.width=10, fig.height=6}
+emms.gg <- emms[which(emms$porte == "Between 51 and 200"),]
+if (nrow(emms.gg) > 0)
+  ggline(emms.gg, x = "time", y = "emmean", color = "#EFC000FF", ylab = "score2", size = 1) +
+    geom_errorbar(aes(ymin = conf.low, ymax = conf.high),
+                  width = 0.1, color = "#EFC000FF", linewidth = 1) +
+    stat_pvalue_manual(
+      add_xy_position(pwc[which(pwc$porte == "Between 51 and 200"),],
+                      x = "time", fun = "mean_se"),
+      hide.ns = T, color = "#EFC000FF", tip.length = F) +
+    theme(legend.text = element_blank())
+```
+
+
+```{r, dpi=300, fig.width=10, fig.height=6}
+emms.gg <- emms[which(emms$porte == "Between 201 and 500"),]
+if (nrow(emms.gg) > 0)
+  ggline(emms.gg, x = "time", y = "emmean", color = "#868686FF", ylab = "score2", size = 1) +
+    geom_errorbar(aes(ymin = conf.low, ymax = conf.high),
+                  width = 0.1, color = "#868686FF", linewidth = 1) +
+    stat_pvalue_manual(
+      add_xy_position(pwc[which(pwc$porte == "Between 201 and 500"),],
+                      x = "time", fun = "mean_se"),
+      hide.ns = T, color = "#868686FF", tip.length = F) +
+    theme(legend.text = element_blank())
+```
+
+
+
+
+```{r, dpi=300, fig.width=10, fig.height=6}
+emms.gg <- emms[which(emms$porte == "Between 501 and 1000"),]
+if (nrow(emms.gg) > 0)
+  ggline(emms.gg, x = "time", y = "emmean", color = "#CD534CFF", ylab = "score2", size = 1) +
+    geom_errorbar(aes(ymin = conf.low, ymax = conf.high),
+                  width = 0.2, color = "#CD534CFF", linewidth = 1) +
+    stat_pvalue_manual(
+      add_xy_position(pwc[which(pwc$porte == "Between 501 and 1000"),],
+                      x = "time", fun = "mean_se"),
+      hide.ns = T, color = "#CD534CFF", tip.length = F) +
+    theme(legend.text = element_blank())
+```
+
+
+

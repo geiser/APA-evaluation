@@ -32,6 +32,9 @@ edat <- merge(dat, escolas, by = "cod_escola", all.x = T)
 dvs <- c("score", "segmentacao", "coesao", "pontuacao",
          "ortografia", "tipologia_textual", "adequacao_a_proposta")
 
+
+
+
 for (dv in dvs) {
 
   colors <- list()
@@ -75,22 +78,38 @@ for (dv in dvs) {
         })
       ))
 
+      params[["ciclos.full"]] = c("Primeiro Ciclo","Segundo Ciclo","Terceiro Ciclo") #,"Quarto Ciclo")
+      params[["ciclos.short"]] = c("c1","c2","c3") # ,"c4")
+
       do.call(tmpl, c(
         list(".t" = paste(readLines("templates/pwc-one-factor-sub.Rmd"),
                           collapse="\n")), params))
     }))
   )
 
+
+
   info <- list(file.path = "../data/data.xlsx", dv = dv, sheet = "alunos_ef14",
-               output = paste0(getwd(),'/code/aov-students-1_4-',dv,'.Rmd'),
+               output = paste0(getwd(),'/code/aov-students-1_4-',dv,'-c1-c3.Rmd'),
                fig.width = 10, fig.height = 6)
   info[["one.factor"]] = txt
+
+  info[["ciclos.full"]] = c("Primeiro Ciclo","Segundo Ciclo","Terceiro Ciclo") # ,"Quarto Ciclo")
+  info[["ciclos.short"]] = c("c1","c2","c3") #,"c4")
 
   writeLines(do.call(
     tmpl, c(list(".t" = paste(
       readLines("templates/aov-student.Rmd"), collapse="\n")), info)),
     info$output, useBytes=T)
-  #rmarkdown::render(info$output, output_format = "github_document")
+
+
+
+  tryCatch(
+    rmarkdown::render(info$output, output_format = "github_document"),
+    error = function(e) {
+      warning(paste0("problem in: ", info$output))
+    }
+  )
 }
 
 
@@ -187,7 +206,14 @@ for (dv in c("score", "coesao", "coerencia_tematica", "registro_formal")) {
         readLines("templates/aov-student.Rmd"), collapse="\n")), info)),
       info$output, useBytes=T)
 
-    #rmarkdown::render(info$output, output_format = "github_document")
+    tryCatch(
+      rmarkdown::render(info$output, output_format = "github_document"),
+      error = function(e) {
+        warning(paste0("problem in: ", info$output))
+      }
+    )
+
+    #
   }
 }
 

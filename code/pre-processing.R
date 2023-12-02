@@ -20,12 +20,13 @@ al_ef14.by <- al_ef14 %>% group_by(aluno_id, gender, ciclo, id_turma, cod_escola
             tipologia_textual = mean(tipologia_textual_num, na.rm = T),
             segmentacao = mean(segmentacao_num, na.rm = T),
             pontuacao = mean(pontuacao_num, na.rm = T),
-            ortografia = mean(ortografia_num, na.rm = T),
-            adequacao_a_proposta = mean(adequacao_a_proposta_num, na.rm = T))
+            ortografia = mean(ortografia_num, na.rm = T))
 al_ef14.by <- mutate(as.data.frame(al_ef14.by),
-                 score = (segmentacao+coesao+pontuacao+ortografia+
-                            tipologia_textual+adequacao_a_proposta)/6)
-
+                     score = (segmentacao+coesao+pontuacao+ortografia+tipologia_textual)/5)
+al_ef14.by <- mutate(as.data.frame(al_ef14.by),
+                     score = (segmentacao+coesao+pontuacao+ortografia+tipologia_textual)/5)
+al_ef14.by <- mutate(as.data.frame(al_ef14.by),
+                     score2 = (segmentacao+coesao+pontuacao+tipologia_textual)/4)
 
 
 al_ef59 <- read_delim("data/dados_apa_ef59/APA_alunos_anonimizados_ef59.csv",
